@@ -6,8 +6,34 @@ from scipy import special
 from scipy.optimize import curve_fit
 
 from composite import (DAYS_PER_MONTH, _daily_reference_from_series,
+                       _exclude_onset_years,
                        _extract_events_at_nearest_samples,
-                       _remove_daily_climatology, reference_dates)
+                       _remove_daily_climatology, _remove_linear_trend,
+                       reference_dates)
+
+
+def max_min_amplitude(da):
+    """Return half the maximum-minus-minimum range over composite lag.
+
+    A Dataset returns one amplitude for each variable with a ``lag``
+    dimension. A DataArray retains every dimension except ``lag``.
+    """
+    if isinstance(da, xr.Dataset):
+        variables = {
+            name: max_min_amplitude(variable)
+            for name, variable in da.data_vars.items()
+            if "lag" in variable.dims
+        }
+        if not variables:
+            raise ValueError("da must contain a variable with a 'lag' dimension")
+        return xr.Dataset(variables, attrs=da.attrs)
+    if not isinstance(da, xr.DataArray) or "lag" not in da.dims:
+        raise ValueError("da must be a DataArray with a 'lag' dimension")
+
+    result = (da.max("lag") - da.min("lag")) / 2
+    result.name = da.name
+    result.attrs = da.attrs.copy()
+    return result
 
 
 def fit_sine(profile, period=None, period_guess=28.0):
@@ -75,6 +101,42 @@ def fit_sine(profile, period=None, period_guess=28.0):
             "period": period, "profile": profile, "fit": fit}
 
 
+def zero_crossing_period_range(onset_dates, exclude_years=None):
+    """Return the smallest and largest individual QBO periods in months.
+
+    Periods are intervals between consecutive same-direction zero crossings.
+    A mapping combines all supplied onset directions. An excluded onset year
+    removes the cycle that starts at that crossing.
+    """
+    _, excluded = _exclude_onset_years(
+        np.array([], dtype="datetime64[ns]"), exclude_years)
+    sequences = (onset_dates.values() if hasattr(onset_dates, "keys")
+                 else (onset_dates,))
+    periods_days = []
+    for sequence in sequences:
+        dates = np.asarray(sequence, dtype="datetime64[ns]")
+        dates = np.unique(dates[~np.isnat(dates)])
+        if dates.size < 2:
+            continue
+        starts = dates[:-1]
+        start_years = starts.astype("datetime64[Y]").astype(int) + 1970
+        keep = ~np.isin(start_years, excluded)
+        periods_days.extend(
+            ((dates[1:] - starts) / np.timedelta64(1, "D"))[keep]
+        )
+    if not periods_days:
+        raise ValueError("At least one complete zero-crossing period is required")
+    periods_months = np.asarray(periods_days, dtype=float) / DAYS_PER_MONTH
+    return xr.DataArray(
+        [periods_months.min(), periods_months.max()],
+        dims="period_bound",
+        coords={"period_bound": ["smallest", "largest"]},
+        name="zero_crossing_period_range",
+        attrs={"units": "months",
+               "excluded_years": ",".join(map(str, excluded))},
+    )
+
+
 def daily_composite_period(
     ds_native,
     reference_level=30.0,
@@ -85,6 +147,8 @@ def daily_composite_period(
     window_months=15.0,
     climatology_smooth_days=31,
     period_guess=28.0,
+    detrend=False,
+    exclude_years=None,
 ):
     """Return the QBO period from daily 30-hPa onset composites.
 
@@ -93,6 +157,8 @@ def daily_composite_period(
     sample. Complete equatorial-wind cycles are deseasonalised, averaged and
     fitted in days for each onset direction. Their mean is returned in days
     and months, together with the component fits, dates and cycle counts.
+    ``detrend=True`` removes the daily field trend. ``exclude_years`` omits
+    events whose onset falls in those years.
     """
     if not isinstance(ds_native, xr.Dataset) or "u" not in ds_native:
         raise ValueError("ds_native must be a Dataset containing zonal wind 'u'")
@@ -132,16 +198,20 @@ def daily_composite_period(
         climatology_smooth_days=climatology_smooth_days,
     )
     shear_types = ("easterly", "westerly")
-    dates = {
-        shear: reference_dates(
+    dates, all_dates = {}, {}
+    for shear in shear_types:
+        onset_dates = reference_dates(
             reference, direction=shear, merge_months=merge_months,
             merge_days=merge_days,
         )
-        for shear in shear_types
-    }
+        all_dates[shear] = onset_dates
+        dates[shear], excluded = _exclude_onset_years(
+            onset_dates, exclude_years)
     period_series = _remove_daily_climatology(
         period_raw, smooth_days=climatology_smooth_days
     )
+    if detrend:
+        period_series = _remove_linear_trend(period_series)
 
     lag_days = np.arange(-window_days, window_days + 1)
     lag_months = lag_days / DAYS_PER_MONTH
@@ -169,6 +239,11 @@ def daily_composite_period(
         )
         n_events.append(event_data.sizes["event"])
 
+    crossing_range = zero_crossing_period_range(
+        all_dates, exclude_years=exclude_years)
+    crossing_range_days = crossing_range * DAYS_PER_MONTH
+    crossing_range_days.name = "zero_crossing_period_days_range"
+    crossing_range_days.attrs["units"] = "days"
     period_days = np.asarray(fitted_period_days)
     common_period_days = float(np.mean(period_days))
     periods = period_days / DAYS_PER_MONTH
@@ -202,6 +277,8 @@ def daily_composite_period(
             "period": common_period,
             "period_days": common_period_days,
             "period_days_shear_difference": abs(period_days[0] - period_days[1]),
+            "zero_crossing_period_range": crossing_range,
+            "zero_crossing_period_days_range": crossing_range_days,
             "n_onsets": ("shear", [len(dates[shear]) for shear in shear_types]),
             "n_events": ("shear", n_events),
         },
@@ -224,6 +301,8 @@ def daily_composite_period(
         result[name].attrs["units"] = "days"
     result["lag"].attrs["units"] = "days"
     result["lag_month"].attrs["units"] = "months"
+    result.attrs["detrended"] = int(detrend)
+    result.attrs["excluded_years"] = ",".join(map(str, excluded))
     return result
 
 
@@ -291,15 +370,38 @@ def vertical_extent(amplitude, fraction=0.1, boundary="top",
                         attrs={"units": units, "fraction": fraction})
 
 
+def _add_zero_crossing_range(result, zero_crossing_range):
+    """Add a validated zero-crossing period range to a result."""
+    if zero_crossing_range is None:
+        return result
+    values = np.asarray(zero_crossing_range, dtype=float)
+    if (values.shape != (2,) or not np.all(np.isfinite(values)) or
+            np.any(values <= 0) or values[0] > values[1]):
+        raise ValueError(
+            "zero_crossing_range must contain a positive smallest and largest period"
+        )
+    excluded_years = getattr(zero_crossing_range, "attrs", {}).get(
+        "excluded_years", "")
+    result["zero_crossing_period_range"] = xr.DataArray(
+        values, dims="period_bound",
+        coords={"period_bound": ["smallest", "largest"]},
+        attrs={"units": "months", "excluded_years": excluded_years},
+    )
+    return result
+
+
 def phase_amplitude(da, period=None, reference_pres=30.0,
-                    period_guess=28.0, pres_range=(1, 200)):
+                    period_guess=28.0, pres_range=(1, 200),
+                    zero_crossing_range=None):
     """Fit QBO period, amplitude and phase at each pressure.
 
     ``da`` is a ``(lag, pres)`` DataArray or a mapping with easterly- and
     westerly-onset composites. A mapping uses the mean of free period fits at
     ``reference_pres``; ``period`` supplies a fixed common value. The result
-    contains amplitude, phase, offset, period, top and bottom vertical
-    extents, profiles and fitted curves within ``pres_range``.
+    contains half-range amplitude, sine-fit amplitude, phase, offset,
+    period, vertical extents, profiles and fitted curves within ``pres_range``.
+    ``zero_crossing_range`` optionally supplies the smallest and largest
+    individual-cycle periods for reporting.
     """
     shear_types = ("easterly", "westerly")
     if hasattr(da, "keys"):
@@ -330,7 +432,7 @@ def phase_amplitude(da, period=None, reference_pres=30.0,
             result["period_by_composite"] = xr.DataArray(
                 fitted_periods, dims="period_composite",
                 coords={"period_composite": list(shear_types)})
-        return result
+        return _add_zero_crossing_range(result, zero_crossing_range)
     if not isinstance(da, xr.DataArray):
         raise ValueError("da must be a DataArray or an easterly/westerly mapping")
     if "lag" not in da.dims or "pres" not in da.dims:
@@ -362,7 +464,8 @@ def phase_amplitude(da, period=None, reference_pres=30.0,
         out["fit"][k] = f["fit"].values
 
     result = xr.Dataset(
-        {"amp": ("pres", out["amp"]), "phase": ("pres", out["phase"]),
+        {"amplitude": max_min_amplitude(da),
+         "amp": ("pres", out["amp"]), "phase": ("pres", out["phase"]),
          "offset": ("pres", out["offset"]),
          "period": period, "fit": (("pres", "lag"), out["fit"]),
          "profile": da},
@@ -395,7 +498,7 @@ def phase_amplitude(da, period=None, reference_pres=30.0,
                 result["pres"] > bottom_extent, drop=True).values)
             bottom = float(np.min(below)) if below.size else bottom_extent
         result = result.sel(pres=slice(top, bottom))
-    return result
+    return _add_zero_crossing_range(result, zero_crossing_range)
 
 
 def _crossing_line(values, coordinate, increasing, seed_index, seed_value,
@@ -625,17 +728,51 @@ def descent_rate(da, cycles=None, pres_range=(1, 200), reference_pres=30.0,
     return result
 
 
-def cycle_coherence(events, composite=None, pres_range=(1, 200)):
+def variance_explained(events, composite=None):
+    """Return composite variance explained across event and lag.
+
+    The result retains every other input dimension. ``composite`` defaults to
+    the event mean.
+    """
+    if not isinstance(events, xr.DataArray):
+        raise ValueError("events must be a DataArray")
+    if not {"event", "lag"}.issubset(events.dims):
+        raise ValueError("events must have 'event' and 'lag' dimensions")
+    if composite is None:
+        composite = events.mean("event")
+    elif not isinstance(composite, xr.DataArray):
+        raise ValueError("composite must be a DataArray")
+    events, composite = xr.align(events, composite, join="exact")
+
+    dimensions = ("event", "lag")
+    total_variance = events.var(dimensions)
+    residual_variance = (events - composite).var(dimensions)
+    result = xr.where(
+        total_variance > 0,
+        1 - residual_variance / total_variance,
+        np.nan,
+    )
+    result.name = "variance_explained"
+    result.attrs = {
+        "long_name": "variance explained by the composite",
+        "units": "1",
+    }
+    return result
+
+
+def cycle_coherence(events, composite=None, pres_range=(0.5, 200)):
     """Compare onset-aligned QBO cycles with their composite.
 
     ``events`` contains cycle windows with ``(event, lag, pres)`` dimensions;
     ``composite`` defaults to their mean. Coherence is the squared lag correlation at each
-    pressure. Whole-pattern correlation is the pressure-weighted Pearson
-    correlation over lag and pressure. Amplitude ratio is the cycle RMS divided
-    by composite RMS. Cycle spread excludes pointwise values outside the
-    standard 1.5-IQR limits. The result also contains a reconstructed timeline
-    when ``event_time`` is available. The displayed wind retains the input
-    pressure range without changing the range used by the metrics.
+    pressure. Variance explained compares residual and total variance across
+    cycle and lag at each pressure. Whole-pattern correlation is the
+    pressure-weighted Pearson correlation over lag and pressure. Amplitude
+    ratio is the cycle RMS divided by composite RMS. Cycle spread excludes
+    pointwise values outside the standard 1.5-IQR limits. The result also
+    contains a reconstructed timeline when ``event_time`` is available. The
+    displayed wind retains the input pressure range without changing the range
+    used by the metrics.
     """
     required = {"event", "lag", "pres"}
     if not required.issubset(events.dims):
@@ -659,6 +796,7 @@ def cycle_coherence(events, composite=None, pres_range=(1, 200)):
     vertical_weights /= vertical_weights.sum()
 
     coherence = xr.corr(events, composite, dim="lag") ** 2
+    explained_variance = variance_explained(events, composite)
 
     flat_weights = np.tile(vertical_weights, events.sizes["lag"])
     y = composite_values.ravel()
@@ -722,6 +860,7 @@ def cycle_coherence(events, composite=None, pres_range=(1, 200)):
          "composite": (("lag", "pres"), composite_values),
          "cycle_std": (("lag", "pres"), cycle_std),
          "coherence": coherence,
+         "variance_explained": explained_variance,
          "mean_coherence": mean_coherence,
          "pattern_correlation": ("event", pattern_correlation),
          "amplitude_ratio": ("event", amplitude_ratio),

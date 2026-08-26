@@ -33,6 +33,21 @@ def _remove_monthly_climatology(obj):
     return obj - climatology_by_time.drop_vars("month")
 
 
+def _remove_linear_trend(obj):
+    """Remove the linear trend from each time-dependent variable."""
+    if isinstance(obj, xr.DataArray):
+        trend = obj.polyfit(dim="time", deg=1)
+        result = obj - xr.polyval(obj["time"], trend.polyfit_coefficients)
+        result.attrs = obj.attrs.copy()
+        return result
+
+    result = obj.copy()
+    for name, variable in obj.data_vars.items():
+        if "time" in variable.dims:
+            result[name] = _remove_linear_trend(variable)
+    return result
+
+
 def _remove_daily_climatology(series, smooth_days=31):
     """Subtract a cyclic, smoothed calendar-day climatology.
 
@@ -253,29 +268,65 @@ def _extract_events_at_nearest_samples(obj, dates, window):
     return xr.concat(events, dim=event_coord)
 
 
-def extract_events(ds_monthly, dates, window=15, deseasonalise=True):
+def _exclude_onset_years(dates, exclude_years):
+    """Return onset dates outside the requested calendar years."""
+    dates = np.asarray(dates)
+    try:
+        if exclude_years is None:
+            values = []
+        elif np.isscalar(exclude_years):
+            values = [exclude_years]
+        else:
+            values = list(exclude_years)
+        excluded = [int(year) for year in values]
+        if any(float(year) != excluded[index]
+               for index, year in enumerate(values)):
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ValueError("exclude_years must contain calendar years") from exc
+    if excluded:
+        years = dates.astype("datetime64[Y]").astype(int) + 1970
+        dates = dates[~np.isin(years, excluded)]
+    return dates, excluded
+
+
+def extract_events(ds_monthly, dates, window=15, deseasonalise=True,
+                   detrend=False, exclude_years=None):
     """Return complete monthly QBO-cycle windows centred on onset ``dates``.
 
     Onsets are aligned to the nearest monthly sample. The result has
     ``(event, lag, ...)`` dimensions and an ``event_time`` coordinate.
-    ``deseasonalise=True`` removes the calendar-month climatology; cycle
-    fields retain their linear trends.
+    ``deseasonalise=True`` removes the calendar-month climatology.
+    ``detrend=True`` also removes each field's linear trend before extracting
+    events. ``exclude_years`` omits events whose onset falls in those years.
     """
     if deseasonalise:
         ds_monthly = _remove_monthly_climatology(ds_monthly)
-    return _extract_events_at_nearest_samples(ds_monthly, dates, window)
+    if detrend:
+        ds_monthly = _remove_linear_trend(ds_monthly)
+
+    dates, excluded = _exclude_onset_years(dates, exclude_years)
+
+    events = _extract_events_at_nearest_samples(ds_monthly, dates, window)
+    events.attrs["detrended"] = int(detrend)
+    events.attrs["excluded_years"] = ",".join(map(str, excluded))
+    return events
 
 
-def compute_composite(ds_monthly, dates, window=15, deseasonalise=True):
+def compute_composite(ds_monthly, dates, window=15, deseasonalise=True,
+                      detrend=False, exclude_years=None):
     """Return the mean of complete QBO-cycle windows centred on onset ``dates``.
 
     The result retains pressure and latitude, with monthly lags from
     ``-window`` to ``+window``. ``deseasonalise=True`` removes the
-    calendar-month climatology. Cycle fields retain their linear trends.
+    calendar-month climatology. ``detrend=True`` removes linear trends from
+    the source fields. ``exclude_years`` omits onsets in those years.
     """
     events = extract_events(ds_monthly, dates, window=window,
-                            deseasonalise=deseasonalise)
+                            deseasonalise=deseasonalise, detrend=detrend,
+                            exclude_years=exclude_years)
     comp = events.mean(dim="event")
+    comp.attrs.update(events.attrs)
     comp.attrs["n_events"] = events.sizes["event"]
     return comp
 

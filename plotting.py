@@ -214,17 +214,25 @@ def _expand_shear_fits(fits):
     return expanded
 
 
+def _zero_crossing_range_label(period_range):
+    """Return a plot label that identifies excluded onset years."""
+    excluded = period_range.attrs.get("excluded_years", "")
+    suffix = f" ({excluded.replace(',', '/')} excluded)" if excluded else ""
+    return f"zero-crossing range{suffix}"
+
+
 def plot_period_fits(fits, title="QBO period fits"):
     """Plot reference-pressure profiles and their sinusoidal fits.
 
     ``fits`` maps labels to ``phase_amplitude`` results. Each panel reports
-    period, amplitude and phase.
+    period, half-range amplitude, sine-fit amplitude and phase.
     """
     expanded = _expand_shear_fits(fits)
     fig, axes = plt.subplots(1, len(expanded),
                              figsize=(5 * len(expanded), 3.6),
                              constrained_layout=True)
-    for ax, (var, ds) in zip(np.atleast_1d(axes), expanded):
+    axes = np.atleast_1d(axes)
+    for ax, (var, ds) in zip(axes, expanded):
         reference_pres = ds.attrs.get("reference_pres", 30.0)
         f = (ds.sel(pres=reference_pres) if reference_pres in ds["pres"]
              else ds.interp(pres=reference_pres))
@@ -244,9 +252,23 @@ def plot_period_fits(fits, title="QBO period fits"):
                 for name, value in zip(ds["period_composite"].values,
                                        ds["period_by_composite"].values))
             period_text += f" (mean of {components})"
-        ax.set_title(f"{var} at {float(f['pres']):g} hPa; {period_text}\n"
-                     f"amplitude {float(f['amp']):.2g}, phase {float(f['phase']):+.2f} rad")
-        ax.legend(frameon=False)
+        range_text = ""
+        if "zero_crossing_period_range" in ds:
+            crossing_range = ds["zero_crossing_period_range"]
+            smallest, largest = crossing_range.values
+            range_text = (
+                f"\n{_zero_crossing_range_label(crossing_range)} "
+                f"{smallest:.1f}–{largest:.1f} months"
+            )
+        amplitude_text = (f", half-range {float(f['amplitude']):.2g}"
+                          if "amplitude" in f else "")
+        ax.set_title(f"{var} at {float(f['pres']):g} hPa; {period_text}"
+                     f"{range_text}\n"
+                     f"sine amplitude {float(f['amp']):.2g}{amplitude_text}, "
+                     f"phase {float(f['phase']):+.2f} rad")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside lower center", ncols=len(labels),
+               frameon=False)
     fig.suptitle(title)
     return fig
 
@@ -259,7 +281,9 @@ def plot_daily_period_fits(result, title="Daily-sampled QBO period fits"):
     """
     required = {"profile", "fit", "period_by_composite",
                 "period_days_by_composite", "period", "period_days",
-                "period_days_shear_difference"}
+                "period_days_shear_difference",
+                "zero_crossing_period_range",
+                "zero_crossing_period_days_range"}
     missing = sorted(required - set(result.data_vars))
     if missing or "shear" not in result.dims or "lag" not in result.dims:
         detail = f": missing {missing}" if missing else ""
@@ -289,10 +313,18 @@ def plot_daily_period_fits(result, title="Daily-sampled QBO period fits"):
             f"{float(selected['period_days_by_composite']):.1f} days"
         )
         ax.legend(frameon=False)
+    crossing_range = result["zero_crossing_period_range"]
+    smallest, largest = crossing_range.values
+    smallest_days, largest_days = result[
+        "zero_crossing_period_days_range"
+    ].values
     fig.suptitle(
         f"{title}\ncommon period {float(result['period']):.2f} months / "
         f"{float(result['period_days']):.1f} days; shear difference "
-        f"{float(result['period_days_shear_difference']):.1f} days"
+        f"{float(result['period_days_shear_difference']):.1f} days\n"
+        f"{_zero_crossing_range_label(crossing_range)} "
+        f"{smallest:.2f}–{largest:.2f} months / "
+        f"{smallest_days:.1f}–{largest_days:.1f} days"
     )
     return fig
 
@@ -371,8 +403,7 @@ def _vertical_extent_specs(source):
             "value": value,
             "fraction": fraction,
             "linestyle": linestyle,
-            "label": (f"{boundary.capitalize()} {fraction:.0%} extent "
-                      f"({value:.3g} hPa)"),
+            "label": f"{boundary.capitalize()} {fraction:.0%} extent",
         })
     return specs
 
@@ -381,11 +412,12 @@ def plot_phase_amplitude(fits, title="QBO phase and amplitude",
                          show_vertical_extent=True,
                          phase_limits=(-np.pi, np.pi),
                          pres_range=(1, 200)):
-    """Plot amplitude and phase profiles from sinusoidal fits.
+    """Plot half-range amplitude, sine-fit amplitude and phase profiles.
 
     ``fits`` maps labels to ``phase_amplitude`` results. Each row shows
-    amplitude and wrapped phase. ``show_vertical_extent`` marks the top and
-    bottom amplitude thresholds; ``phase_limits`` controls phase wrapping.
+    half-range amplitude, sine-fit amplitude and wrapped phase.
+    ``show_vertical_extent`` marks the top and bottom sine-fit amplitude
+    thresholds; ``phase_limits`` controls phase wrapping.
     """
     expanded = _expand_shear_fits(fits)
     fig, axes = plt.subplots(len(expanded), 2, squeeze=False,
@@ -416,14 +448,17 @@ def plot_phase_amplitude(fits, title="QBO phase and amplitude",
         reference_pres = ds.attrs.get("reference_pres", 30.0)
 
         amp_ax.plot(ds["amp"], ds["pres"], color="b", marker="o",
-                    ms=3)
+                    ms=3, label="sine-fit amplitude")
+        if "amplitude" in ds:
+            amp_ax.plot(ds["amplitude"], ds["pres"], color="purple",
+                        marker="o", ms=3, ls="--",
+                        label="half-range amplitude")
         _plot_reference_pressure(
             amp_ax, reference_pres,
             label=f"Reference ({reference_pres:g} hPa)")
         amp_ax.set_xlabel(f"Amplitude{units}")
         amp_ax.set_ylabel("Pressure (hPa)")
-        amp_ax.set_title(f"{var} amplitude")
-        amp_ax.legend(frameon=False)
+        amp_ax.set_title(f"{var} amplitude profiles")
 
         phase_ax.axvline(0, color="0.85", lw=1)
         phase_line, phase_pres, phase_markers = _wrapped_phase_line(
@@ -437,13 +472,19 @@ def plot_phase_amplitude(fits, title="QBO phase and amplitude",
         for spec in extent_specs:
             amp_ax.axhline(spec["value"], color="green", lw=1.5,
                            ls=spec["linestyle"], label=spec["label"])
+            amp_ax.annotate(
+                f"{spec['value']:.3g} hPa",
+                xy=(0.99, spec["value"]), xycoords=("axes fraction", "data"),
+                xytext=(0, -2),
+                textcoords="offset points", ha="right",
+                va="top", color="0.4", fontsize=8)
             phase_ax.axhline(spec["value"], color="green", lw=1.5,
                              ls=spec["linestyle"])
-            amp_ax.legend(frameon=False)
         phase_ax.set_xlim(*phase_limits)
         phase_ax.set_xticks(phase_ticks, phase_labels)
         phase_ax.set_xlabel("Phase (radians)")
-        phase_ax.set_title(f"{var} phase; period {float(ds['period']):.1f} months")
+        phase_ax.set_title(
+            f"{var} phase; period {float(ds['period']):.1f} months")
 
         for ax in (amp_ax, phase_ax):
             ax.set_yscale("log")
@@ -463,24 +504,43 @@ def plot_phase_amplitude(fits, title="QBO phase and amplitude",
                         bottom = max(bottom, float(ds["pres"].max()))
             amp_ax.set_ylim(bottom, top)
 
+    legend_items = {}
+    for amp_ax in axes[:, 0]:
+        handles, labels = amp_ax.get_legend_handles_labels()
+        for handle, label in zip(handles, labels):
+            legend_items.setdefault(label, handle)
+    fig.legend(legend_items.values(), legend_items.keys(),
+               loc="outside lower center", ncols=min(3, len(legend_items)),
+               frameon=False)
     fig.suptitle(title)
     return fig
 
 
 def plot_cycle_coherence(result, variable="QBO variable",
-                         title="QBO cycle coherence", pres_range=(1, 200),
+                         title="QBO cycle coherence", pres_range=(0.5, 200),
                          vertical_extents=None, reference_pres=30.0):
-    """Plot QBO-cycle anomalies and coherence against time.
+    """Plot QBO-cycle anomalies, coherence and variance explained.
 
-    ``result`` is returned by ``cycle_coherence``. Both panels use its
-    reconstructed timeline. The wind panel uses the full input pressure range;
-    coherence uses the diagnostic pressure range.
+    ``result`` is returned by ``cycle_coherence``. The time panels use its
+    reconstructed timeline. The wind panel uses the full input pressure range.
+    Coherence and variance explained use the diagnostic pressure range.
     ``vertical_extents`` adds boundaries from ``phase_amplitude`` to the QBO
     wind panel. Dashed lines mark ``reference_pres`` in every panel when it
     is not ``None``.
     """
-    fig, axes = plt.subplots(2, 1, figsize=(11, 6.4), sharex=True, sharey=True,
-                             constrained_layout=True)
+    fig = plt.figure(figsize=(12, 6.4), constrained_layout=True)
+    grid = fig.add_gridspec(2, 2, width_ratios=(4, 1))
+    axes = np.array([
+        fig.add_subplot(grid[0, 0]),
+        fig.add_subplot(grid[1, 0]),
+    ])
+    axes[1].sharex(axes[0])
+    axes[1].sharey(axes[0])
+    profile_axes = np.array([
+        fig.add_subplot(grid[0, 1], sharey=axes[0]),
+        fig.add_subplot(grid[1, 1], sharey=axes[1]),
+    ])
+    profile_axes[1].sharex(profile_axes[0])
     wind = result["wind"]
     limit = float(np.nanmax(np.abs(wind.values)))
     levels = ticker.MaxNLocator(nbins=18, symmetric=True).tick_values(-limit, limit)
@@ -503,11 +563,29 @@ def plot_cycle_coherence(result, variable="QBO variable",
         levels=coherence_levels, cmap="viridis")
     axes[1].set_title("Cycle/composite coherence ($r^2$ across lag)")
 
+    finite_variance = np.asarray(result["variance_explained"].values)
+    finite_variance = finite_variance[np.isfinite(finite_variance)]
+    left = min(0, float(finite_variance.min())) if finite_variance.size else 0
+    for profile_ax in profile_axes:
+        profile_ax.plot(
+            result["variance_explained"], result["pres"],
+            color="tab:purple", lw=2, label="Variance explained")
+        profile_ax.axvline(0, color="0.5", lw=0.8, ls=":")
+        profile_ax.set_xlim(left - 0.04 * (1 - left), 1)
+        profile_ax.set_title("Composite\nvariance explained")
+        profile_ax.grid(color="0.9", lw=0.8)
+    profile_axes[0].tick_params(axis="x", labelbottom=False)
+    profile_axes[1].set_xlabel("Variance explained")
+
     extent_specs = _vertical_extent_specs(vertical_extents)
     for spec in extent_specs:
         axes[0].axhline(spec["value"], color="green", lw=2.5,
                        ls=spec["linestyle"], label=spec["label"])
-    for i, ax in enumerate(axes):
+        for profile_ax in profile_axes:
+            profile_ax.axhline(spec["value"], color="green", lw=2.5,
+                               ls=spec["linestyle"])
+    all_axes = (*axes, *profile_axes)
+    for i, ax in enumerate(all_axes):
         label = (f"Reference ({reference_pres:g} hPa)"
                  if i == 0 and reference_pres is not None else None)
         _plot_reference_pressure(ax, reference_pres, label=label,
@@ -522,9 +600,12 @@ def plot_cycle_coherence(result, variable="QBO variable",
             for ax in axes:
                 ax.axvline(date, color="0.25", lw=0.6, ls="--", alpha=0.5)
 
-    for ax in axes:
+    for ax in all_axes:
         ax.set_yscale("log")
+    for ax in axes:
         ax.set_ylabel("Pressure (hPa)")
+    for profile_ax in profile_axes:
+        profile_ax.tick_params(axis="y", labelleft=False)
     if pres_range is None:
         axes[0].invert_yaxis()
     else:
