@@ -55,18 +55,22 @@ wind averaged over $5^{\circ}$S--$5^{\circ}$N.  The default direction is
 negative to positive (westerly onset); crossings separated by less than five
 months are averaged. \\
 Composite & Mean deseasonalised anomaly over complete $\pm15$-month cycle
-windows centred on the reference dates. \\
+windows. Users may exclude specified onset years and apply linear detrending. \\
 Latitudinal width & Full width at half maximum of a fitted parabolic-cylinder
 structure at each pressure level. \\
 Period, amplitude and phase & Sinusoidal fits to the composite lag profiles at each pressure level.
 The default QBO period is the mean period from the easterly- and
 westerly-onset zonal wind composites at 30~hPa. \\
+Basic amplitude & Half the maximum-minus-minimum composite range over lag for
+each variable and location. \\
 Vertical extent & Pressure level at 10\%-of-maximum of the fitted amplitude profile (with interpolation). \\
 Descent rate & Mean downward displacement of the onset-connected zero-wind
 contour between successive lags, with a pressure-resolved profile calculated
 from its crossing lag at each pressure. \\
 Cycle-to-cycle coherence & Squared lag correlation between the raw data and its composite over the default
 $\pm15$-month cycle window at each pressure level.\\
+Composite variance explained & Fraction of cycle and lag variance explained
+by the composite at each pressure level.\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -121,10 +125,12 @@ either case the onset time is interpolated between the two bracketing months whe
 two crossings occur within 5 (nominal) months of each other, the midpoint is used as the reference date. This
 prevents a short reversal from defining an additional onset. Figure~\ref{fig:reference} shows the
 westerly-onset (top) and easterly-onset (bottom) dates and the reference timeseries calculated from ERA5.
+All ERA5 composite figures exclude cycles with onset years 2015 and 2020, corresponding to the 2016 and 2020 QBO
+disruptions. The disruptions are included in the cycle-to-cycle variability plots.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.96\textwidth]{reference_timeseries.pdf}
+\includegraphics[width=0.96\textwidth]{reference_timeseries_exclude_2015_2020.pdf}
 \caption{Monthly 30-hPa reference timeseries $r(t)$ for westerly and easterly onsets from ERA5.
 Dashed lines mark zero crossings. A merged pair of nearby crossings would be shown by
 an orange interval and dotted original crossings; none occur in this dataset.}
@@ -136,8 +142,9 @@ an orange interval and dotted original crossings; none occur in this dataset.}
 For the composites, we recommend using monthly-mean data. Each interpolated onset date is aligned to its nearest
 monthly sample and a 31-sample window ($\tau=-15,\ldots,15$ months) is extracted.  QBO cycles without a
 complete window are omitted.  Given a field $x$, the calendar-month climatology is removed at each pressure
-and latitude to form the cycle anomaly $x'_c(\tau, p, \phi)$, but the cycle fields are not detrended.  Thus
-detrending affects identification of onset events only.  For cycle anomaly $x'_c$, the composite is
+and latitude to form the cycle anomaly $x'_c(\tau, p, \phi)$. Cycle fields may be linearly detrended but by
+default are not. QBO cycles can be excluded by their onset year (e.g. to exclude disruptions). For cycle anomaly
+$x'_c$, the composite is
 \begin{equation}
 C_x(\tau,p,\phi)=\frac{1}{N_c}\sum_{c=1}^{N_c}
 x'_c(\tau,p,\phi),
@@ -149,7 +156,7 @@ temperature composites.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.90\textwidth]{lag_height_composite.pdf}
+\includegraphics[width=0.90\textwidth]{lag_height_composite_exclude_2015_2020.pdf}
 \caption{Equatorial westerly-onset composites from ERA5. Filled contours are temperature
 anomalies (K); line contours are zonal-wind anomalies
 ($\mathrm{m\,s^{-1}}$). The grey dashed line marks the 30-hPa reference
@@ -175,14 +182,12 @@ where $a_j(p)$ is a component amplitude, $c(p)$ and $s(p)$ are the common
 centre and latitude scale, and $j$ indexes the fitted components. Fits use $30^{\circ}$S--$30^{\circ}$N by default,
 with $|c(p)|\leq5^{\circ}$ and $2^{\circ}\leq s(p)\leq30^{\circ}$.
 
-For zonal wind, we use the Gaussian $D_0$ by default. For temperature and
-ozone, we use the sum of $D_0$ and $D_2$:
-$D_2$ looks like a central Gaussian with two side-lobes, with $D_0$ included to fit the central amplitude.
-This allows a better fit with both the equatorial and subtropical contributions. Ozone is represented internally
-as \texttt{o3}; CF-compliant input is identified from the standard name
-\texttt{mole\_fraction\_of\_ozone\_in\_air}.
+For zonal wind, we use the Gaussian $D_0$ by default. For temperature, we use
+the sum of $D_0$ and $D_2$. The temperature fit should also be used for ozone
+($\mathrm{O}_3$). The function $D_2$ looks like a central Gaussian with two side-lobes, with $D_0$ included to fit the central amplitude.
+This allows a better fit with both the equatorial and subtropical contributions.
 
-The latitudinal width is calcualted as the full width at half maximum (FWHM) of the absolute fitted equatorial
+The latitudinal width is calculated as the full width at half maximum (FWHM) of the absolute fitted equatorial
 lobe. For completeness, we also report the scale $s(p)$ (which, if equivalent to the FWHM, would be half its
 value).  A fit is accepted when its RMS residual, normalised by the full-cycle lag--latitude RMS after removal
 of the lag mean, is at most 0.5 and its log-FWHM differs by at most 0.1 from interpolation between adjacent
@@ -192,7 +197,7 @@ shows the latitudinal width calculation for zonal wind at 50 hPa and temperature
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\textwidth]{latitudinal_width_fits.pdf}
+\includegraphics[width=\textwidth]{latitudinal_width_fits_exclude_2015_2020.pdf}
 \caption{Parabolic-cylinder fits to zonal wind near 50~hPa and temperature
 near 30~hPa from ERA5.  Solid and dashed markers show FWHM and fitted scale,
 respectively.}
@@ -209,6 +214,13 @@ At each pressure level, the composite lag profile is fitted with
 where $b(p)$ is the offset, $A(p)>0$ is the amplitude, $P$ is the QBO period
 and $\theta(p)\in[-\pi,\pi)$ is the phase.
 
+A basic half-range amplitude is also calculated directly from each
+composite variable:
+\begin{equation}
+A_x^{\mathrm{range}}(p,\phi)=\frac{1}{2}\left[
+\max_\tau C_x(\tau,p,\phi)-\min_\tau C_x(\tau,p,\phi)\right].
+\end{equation}
+
 The QBO period is the mean period obtained from fits to the easterly- and westerly-onset zonal wind composites
 $C_u$ at 30 hPa, interpolated in pressure if necessary. This period is held fixed at all pressure levels for
 subsequent calculations of the amplitude and phase for a given variable. The resulting amplitude and phase
@@ -216,20 +228,29 @@ profiles therefore describe one common oscillation frequency. The QBO period is 
 to the sampling period of the underlying composite. If only monthly raw data is supplied, the sub-monthly
 precision of the period is therefore inferred. 
 
+The smallest and largest individual QBO periods provide a simple uncertainty
+range around the sine-fit period.  Each individual period is the interval
+between consecutive same-direction zero crossings at 30~hPa.  Both onset
+directions contribute to the reported range.  Excluding an onset year removes
+the cycle that starts at that crossing from the range.
+
 If daily data is supplied, the QBO period can optionally be calculated by applying the same compositing and
 fitting procedure to daily raw data.  Nominal-month parameters are converted using 365.25/12 days per month:
 the reference smoothing is 152 days and the $\pm15$-month cycle window becomes $\pm457$ days.  Each
 interpolated onset time is aligned to its nearest daily sample.  The unsmoothed, deseasonalised 30-hPa wind
-at the equator is then composited and fitted as a function of lag in days.  As for monthly cycle fields, these
-daily anomalies are not detrended, and the final reported period is an average of the calculation for a
+at the equator is then composited and fitted as a function of lag in days. As
+for monthly cycle fields, these daily anomalies are not detrended by default.
+The final reported period is an average of the calculation for a
 westerly- and easterly-onset composite. Figure~\ref{fig:daily-period} shows the fit calculation on
 daily-sampled composites.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\textwidth]{daily_period_fits.pdf}
+\includegraphics[width=\textwidth]{daily_period_fits_exclude_2015_2020.pdf}
 \caption{Daily ERA5 30-hPa composites and sine fits.  The periods for different choices of onset
-differ by 60.8 days and average to 850.9 days (27.96 months).}
+differ by 53.5 days and average to 853.9 days (28.05 months).  Individual
+zero-crossing periods range from 18.47 to 37.46 months. The calculation
+excludes the 2015 and 2020 onset years.}
 \label{fig:daily-period}
 \end{figure}
 
@@ -239,14 +260,15 @@ $A(p)$ is 10\% of its maximum:
 	A(p_{\mathrm{top}})=0.1\max_p\{A(p)\}.
 \end{equation}
 No value is assigned if it the threshold is not met in the range of pressure levels provided.
-Figure~\ref{fig:phase-amplitude} shows the phase and amplitude profiles for zonal wind and temperature using
-the daily-sampled QBO period of 27.96 months with the vertical extent and the reference height (30 hPa)
+Figure~\ref{fig:phase-amplitude} shows the phase and both amplitude profiles for zonal wind and temperature using
+the daily-sampled QBO period of 28.05 months with the vertical extent and the reference height (30 hPa)
 indicated.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.94\textwidth]{phase_amplitude.pdf}
-\caption{Amplitude and phase profiles for a QBO period of 27.96 months from ERA5.
+\includegraphics[width=0.94\textwidth]{phase_amplitude_exclude_2015_2020.pdf}
+\caption{Amplitude and phase profiles for a QBO period of 28.05 months from ERA5.
+Blue solid lines show sine-fit amplitude. Purple dashed lines show half-range amplitude.
 Grey dashed and green dash--dot lines mark 30~hPa and the vertical extent, respectively.}
 \label{fig:phase-amplitude}
 \end{figure}
@@ -283,7 +305,7 @@ pressure levels to calculate the cycle-to-cycle standard deviation.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.62\textwidth]{descent_rate.pdf}
+\includegraphics[width=0.62\textwidth]{descent_rate_exclude_2015_2020.pdf}
 \caption{Pressure-resolved downward rates of the onset-connected zero-wind
 contours in the ERA5 easterly- and westerly-onset composites.  Legend values
 are the mean monthly displacements.  Shading spans one standard deviation
@@ -309,14 +331,22 @@ The vertically averaged coherence of cycle $c$ is therefore
 \begin{equation}
 \overline{\mathcal{C}}_c=\sum_p w_p\mathcal{C}_{c,p}.
 \end{equation}
-Figure~\ref{fig:coherence} shows the QBO wind anomalies and cycle/composite
-coherence.
+The composite variance explained at pressure $p$ is
+\begin{equation}
+V_p=1-\frac{\operatorname{var}_{c,\tau}
+[u'_c(\tau,p)-C_u(\tau,p)]}
+{\operatorname{var}_{c,\tau}[u'_c(\tau,p)]}.
+\end{equation}
+Figure~\ref{fig:coherence} shows both metrics with the QBO wind anomalies.
+These diagnostics span 0.5--200~hPa by default.
 
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth]{cycle_coherence.pdf}
-\caption{QBO-cycle anomalies and pressure-resolved coherence on a continuous
-timeline. Vertical dashed lines mark westerly onsets; the
+\caption{QBO-cycle anomalies, pressure-resolved coherence and composite
+variance explained. The variance profile repeats beside both pressure panels.
+The calculation includes the 2015 and 2020 onset years.
+Vertical dashed lines mark westerly onsets; the
 horizontal grey dashed line marks 30~hPa. Green dash--dot and dotted lines in
 the upper panel mark the top and bottom vertical extent, respectively.}
 \label{fig:coherence}
@@ -407,6 +437,9 @@ Crossing merge tolerance & 5 months & Minimum separation between onset events. \
 \multicolumn{3}{@{}l}{\textit{Composites}}\\[0.25em]
 Cycle half-window & 15 months & 31 monthly lags or $\pm457$ daily lags. \\
 Composite deseasonalisation & On & Remove the calendar-month climatology. \\
+Composite detrending & Off & Remove each field's linear trend before cycle
+extraction. \\
+Excluded onset years & None & Omit specified QBO cycles from the composite. \\
 \addlinespace
 \multicolumn{3}{@{}l}{\textit{Period}}\\[0.25em]
 Daily period latitude & $0^{\circ}$ & Latitude to fit for the daily period estimate. \\
@@ -438,7 +471,7 @@ Descent pressure range & 1--200 hPa & Calculation range. \\
 Descent reference pressure & 30 hPa & Selects the onset-connected zero-wind contour. \\
 \addlinespace
 \multicolumn{3}{@{}l}{\textit{Coherence}}\\[0.25em]
-Coherence pressure range & 1--200 hPa & Calculation range. \\
+Coherence pressure range & 0.5--200 hPa & Calculation range. \\
 \end{longtable}
 \normalsize
 
@@ -447,28 +480,36 @@ Coherence pressure range & 1--200 hPa & Calculation range. \\
 \section{Illustration with ERA5}
 
 The figures use ERA5 for 1979--2022: daily wind for the optional period
-estimate and monthly data otherwise.  Of 19 westerly and 18 easterly onsets,
-17 and 18, respectively, have complete cycle windows.  Table
+estimate and monthly data otherwise.  The composites exclude cycles with
+onsets in 2015 and 2020, representing the 2016 and 2020 disruptions.
+The period diagnostics use the same exclusions.  The cycle-to-cycle
+variability diagnostics retain both onset years.
+After these exclusions, 15 westerly and 17 easterly onsets have complete cycle windows.  Table
 \ref{tab:example-results} illustrates the resulting metrics; the values are
 not prescribed observational targets.
 
 \begin{table}[htbp]
 \centering
-\caption{Results from ERA5 data.}
+\caption{ERA5 results. Composite and period metrics exclude the disruption-onset
+years; variability metrics include them.}
 \label{tab:example-results}
 \begin{tabularx}{0.94\textwidth}{@{}Xr@{}}
 \toprule
 Quantity & ERA5 illustration \\
 \midrule
-Complete westerly/easterly cycle windows & 17 / 18 \\
-Monthly-sampled QBO period (easterly-/westerly-onset) & 28.96 / 26.96 months \\
-Daily-sampled QBO period (average of both onsets) & 27.96 months / 850.9 days \\
-Easterly--westerly period difference & 60.8 days \\
-Vertical extent, easterly/westerly composites & 0.82 / 0.75 hPa \\
-Mean descent rate, easterly-/westerly-onset composite & 4.78 / 7.41 $\mathrm{hPa\,month^{-1}}$ \\
-Mean westerly-onset cycle coherence & 0.57 \\
-Westerly-onset wind FWHM near 50 hPa & $22.5^{\circ}$ \\
-Westerly-onset temperature FWHM near 30 hPa & $16.2^{\circ}$ \\
+Complete westerly/easterly cycle windows & 15 / 17 \\
+Complete westerly variability windows & 17 \\
+Monthly-sampled QBO period (easterly-/westerly-onset) & 28.54 / 27.34 months \\
+Daily-sampled QBO period (easterly-/westerly-onset) & 28.93 / 27.18 months \\
+Daily-sampled QBO period (average of both onsets) & 28.05 months / 853.9 days \\
+Individual zero-crossing period range & 18.47--37.46 months \\
+Easterly--westerly period difference & 53.5 days \\
+Top vertical extent, easterly/westerly composites & 0.83 / 0.79 hPa \\
+Bottom vertical extent, easterly/westerly composites & 89.44 / 87.18 hPa \\
+Mean descent rate, easterly-/westerly-onset composite & 4.87 / 7.31 $\mathrm{hPa\,month^{-1}}$ \\
+Mean westerly-onset cycle coherence & 0.52 \\
+Westerly-onset wind FWHM near 50 hPa & $22.8^{\circ}$ \\
+Westerly-onset temperature FWHM near 30 hPa & $16.6^{\circ}$ \\
 \bottomrule
 \end{tabularx}
 \end{table}
