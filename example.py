@@ -8,8 +8,8 @@ import numpy as np
 import xarray as xr
 from matplotlib import pyplot as plt
 
-from composite import (compute_composite, data_loc, extract_events,
-                       reference_dates, reference_timeseries)
+from composite import (compute_composite, extract_events, reference_dates,
+                       reference_timeseries)
 from metrics import (cycle_coherence, daily_composite_period, descent_rate,
                      latitudinal_width, max_min_amplitude, phase_amplitude,
                      zero_crossing_period_range)
@@ -20,13 +20,25 @@ from plotting import (plot_composite, plot_cycle_coherence,
 from utils import load_composite, load_data, save_composite
 
 # Workflow settings.
+DATA_LOC = "qbo_metrics_example_data.nc"
+# For separate files, use ["/path/zonal_wind.nc", "/path/temperature.nc"].
+INPUT_VARIABLES = ("u", "T")
 REBUILD_COMPOSITES = True
-USE_DAILY_PERIOD = False
 EXCLUDED_ONSET_YEARS = (2015, 2020)
 DETREND_COMPOSITES = False
 SAVE_REFERENCE_DATES = True
 REFERENCE_DATES_PATH = "reference_dates.nc"
 SHEAR_TYPES = ("westerly", "easterly")
+COMPOSITE_LAT_RANGE = (0.0, 0.0)
+
+# Composite plot controls. Use None for automatic limits or labels.
+COMPOSITE_PLOT_OPTIONS = {
+    "colorbar_limits": None,
+    "colorbar_label": None,
+    "pres_range": (1.0, 200.0),
+}
+TIME_AXIS_LIMITS = None
+LATITUDE_AXIS_LIMITS = None
 
 
 def _composite_path(shear):
@@ -75,7 +87,7 @@ def _get_composites(ds_monthly, reference, dates):
 def main():
     """Run the configured example workflow and display its figures."""
     print(f"Excluded onset years: {EXCLUDED_ONSET_YEARS}")
-    ds_daily, ds_monthly = load_data(data_loc)
+    ds_daily, ds_monthly = load_data(DATA_LOC, variables=INPUT_VARIABLES)
 
     reference = reference_timeseries(ds_monthly)
     dates = {
@@ -89,9 +101,10 @@ def main():
         }).to_netcdf(REFERENCE_DATES_PATH)
         print(f"Saved reference dates to {REFERENCE_DATES_PATH}")
 
+    latitude_slice = slice(*sorted(COMPOSITE_LAT_RANGE))
     u_eq_monthly = (
-        ds_monthly.sel(pres=slice(0.5, 200), latitude=[0])
-        .mean("latitude")
+        ds_monthly.sel(pres=slice(0.5, 200), latitude=latitude_slice)
+        .mean("latitude", keep_attrs=True)
         .load()
     )
 
@@ -99,8 +112,10 @@ def main():
     composites = _get_composites(ds_monthly, reference, dates)
     westerly_composite = composites["westerly"]
     easterly_composite = composites["easterly"]
-    westerly_equatorial = westerly_composite.sel(latitude=0)
-    easterly_equatorial = easterly_composite.sel(latitude=0)
+    westerly_equatorial = westerly_composite.sel(
+        latitude=latitude_slice).mean("latitude", keep_attrs=True)
+    easterly_equatorial = easterly_composite.sel(
+        latitude=latitude_slice).mean("latitude", keep_attrs=True)
 
     # Diagnose latitudinal width.
     width_fits = {
@@ -151,9 +166,7 @@ def main():
         "westerly": westerly_equatorial["u"],
         "easterly": easterly_equatorial["u"],
     }
-    if USE_DAILY_PERIOD:
-        if ds_daily is None:
-            raise ValueError("Daily period estimation requires daily or sub-daily input")
+    if ds_daily is not None:
         daily_period = daily_composite_period(
             ds_daily, exclude_years=EXCLUDED_ONSET_YEARS,
             detrend=DETREND_COMPOSITES)
@@ -230,14 +243,18 @@ def main():
     # Plot composite structure.
     plot_composite(
         westerly_equatorial["T"], x="lag", x_label="Lag (months)",
-        title="Equatorial zonal wind (contours) and temperature (fill)",
+        title="Tropical zonal wind (contours) and temperature (fill)",
         overlay=westerly_equatorial["u"], overlay_step=10.0,
+        x_limits=TIME_AXIS_LIMITS,
+        **COMPOSITE_PLOT_OPTIONS,
     )
     plot_composite(
         westerly_composite["T"].sel(lag=0),
         x="latitude", x_label="Latitude",
         title="Zonal wind (contours) and temperature (fill) at lag 0",
         overlay=westerly_composite["u"].sel(lag=0), overlay_step=10.0,
+        x_limits=LATITUDE_AXIS_LIMITS,
+        **COMPOSITE_PLOT_OPTIONS,
     )
     plt.show()
 

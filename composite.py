@@ -8,11 +8,6 @@ deseasonalised and averaged about each onset.
 import numpy as np
 import xarray as xr
 
-from plotting import plot_reference
-from utils import load_data, save_composite
-
-data_loc = "/store/atmos-adk33/cwp29/era5/era5_*_daily_uvwT.nc"
-
 DAYS_PER_MONTH = 365.25 / 12
 
 
@@ -148,6 +143,7 @@ def reference_timeseries(ds_monthly, level=30.0, lat_range=(-5, 5), smooth=5):
     ts = _remove_monthly_climatology(ts)
     trend = ts.polyfit(dim="time", deg=1)
     ts = ts - xr.polyval(ts["time"], trend.polyfit_coefficients)
+    ts = ts.load()
     return ts.rolling(time=smooth, center=True).mean().dropna(dim="time")
 
 
@@ -329,16 +325,3 @@ def compute_composite(ds_monthly, dates, window=15, deseasonalise=True,
     comp.attrs.update(events.attrs)
     comp.attrs["n_events"] = events.sizes["event"]
     return comp
-
-
-
-if __name__ == "__main__":
-    ds_daily, ds_monthly = load_data(data_loc)
-
-    ref = reference_timeseries(ds_monthly)
-    dates = reference_dates(ref)
-    print(f"Found {len(dates)} westerly-onset reference dates")
-    plot_reference(ref, dates)
-
-    comp = compute_composite(ds_monthly, dates)
-    save_composite(comp, "qbo_composite.nc")

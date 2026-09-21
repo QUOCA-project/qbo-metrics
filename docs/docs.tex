@@ -96,6 +96,24 @@ $\widehat{C}_x(\tau,p)$ & Fitted lag profile of $C_x$ at a specified latitude. \
 \end{tabularx}
 \end{table}
 
+\section{Input data and workflow}
+
+The code accepts daily or monthly input data. Monthly means are the
+recommended input for composites. The loader resamples daily data to monthly
+means before compositing. The example uses available daily data for the period
+estimate. It otherwise calculates every diagnostic from monthly composites.
+
+Set \texttt{DATA\_LOC} to a path containing both zonal wind and temperature, or provide a file list for separate
+wind and temperature files:
+\begin{verbatim}
+DATA_LOC = ["/data/zonal_wind.nc", "/data/temperature.nc"]
+\end{verbatim}
+
+An example minimal data file \texttt{qbo\_metrics\_example\_data.nc} is included in the GitHub repository,
+containing both \texttt{u} and \texttt{T}. Separate files need compatible time and spatial coordinates. The
+loader recognises aliases for zonal wind, temperature, and trace gases including O3, NOx, NOy, HNO3, HCl, N2O,
+CH4, CFC12, and CO.
+
 \section{Composite methodology}
 \label{sec:composite}
 
@@ -115,7 +133,7 @@ For monthly analysis, the calendar-month climatology and a linear trend are remo
 applying a centred five-month running mean.  The result is the reference timeseries $r(t)$, from which
 reference dates are defined by identifying onset of westerly or easterly winds.
 
-To calculate the QBO period with sub-monthly precision, there is an option to estimate the period using daily
+To calculate the QBO period with sub-monthly precision, the code can estimate the period using daily
 means, a cyclic 31-day-smoothed calendar-day climatology and a centred 152-day mean.  The 29~February
 climatology is the mean of those for 28~February and 1~March. A linear trend is removed before smoothing, as
 for the monthly calculation.
@@ -157,7 +175,7 @@ temperature composites.
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.90\textwidth]{lag_height_composite_exclude_2015_2020.pdf}
-\caption{Equatorial westerly-onset composites from ERA5. Filled contours are temperature
+\caption{$5^{\circ}$S--$5^{\circ}$N mean westerly-onset composites from ERA5. Filled contours are temperature
 anomalies (K); line contours are zonal-wind anomalies
 ($\mathrm{m\,s^{-1}}$). The grey dashed line marks the 30-hPa reference
 pressure.}
@@ -168,6 +186,11 @@ pressure.}
 
 \section{QBO metrics}
 \label{sec:metrics}
+
+Use the parameter \texttt{COMPOSITE\_LAT\_RANGE} to control the size of the latitude mean applied to the
+composite for computing metrics. It defaults to the equator, using \texttt{COMPOSITE\_LAT\_RANGE = (0.0,
+0.0)}. The range $5^{\circ}$S--$5^{\circ}$N may be more appropriate for less finely resolved data. Width
+diagnostics use the full latitude-resolved composite.
 
 \subsection{Latitudinal width}
 
@@ -234,7 +257,7 @@ between consecutive same-direction zero crossings at 30~hPa.  Both onset
 directions contribute to the reported range.  Excluding an onset year removes
 the cycle that starts at that crossing from the range.
 
-If daily data is supplied, the QBO period can optionally be calculated by applying the same compositing and
+If daily data is supplied, the example calculates the QBO period by applying the same compositing and
 fitting procedure to daily raw data.  Nominal-month parameters are converted using 365.25/12 days per month:
 the reference smoothing is 152 days and the $\pm15$-month cycle window becomes $\pm457$ days.  Each
 interpolated onset time is aligned to its nearest daily sample.  The unsmoothed, deseasonalised 30-hPa wind
@@ -440,8 +463,12 @@ Composite deseasonalisation & On & Remove the calendar-month climatology. \\
 Composite detrending & Off & Remove each field's linear trend before cycle
 extraction. \\
 Excluded onset years & None & Omit specified QBO cycles from the composite. \\
+Composite latitude band & $0^{\circ}$ & Average for metrics
+that do not require latitude-resolved fields. \\
 \addlinespace
 \multicolumn{3}{@{}l}{\textit{Period}}\\[0.25em]
+Daily period use & Automatic & Use daily data when available; otherwise use
+monthly composites. \\
 Daily period latitude & $0^{\circ}$ & Latitude to fit for the daily period estimate. \\
 Initial period guess & 28 months & Initial value; the fitted period is bounded
 between half and twice this value. \\
@@ -472,6 +499,15 @@ Descent reference pressure & 30 hPa & Selects the onset-connected zero-wind cont
 \addlinespace
 \multicolumn{3}{@{}l}{\textit{Coherence}}\\[0.25em]
 Coherence pressure range & 0.5--200 hPa & Calculation range. \\
+\addlinespace
+\multicolumn{3}{@{}l}{\textit{Composite plots}}\\[0.25em]
+Colourbar limits & Automatic & Set an explicit minimum and maximum with
+\texttt{colorbar\_limits}. \\
+Horizontal-axis limits & Automatic & Set an explicit minimum and maximum with
+\texttt{x\_limits}. \\
+Pressure-axis limits & 1--200 hPa & Set the displayed pressure range with
+\texttt{pres\_range}. \\
+Colourbar label & None & Set text with \texttt{colorbar\_label}. \\
 \end{longtable}
 \normalsize
 
@@ -479,8 +515,8 @@ Coherence pressure range & 0.5--200 hPa & Calculation range. \\
 
 \section{Illustration with ERA5}
 
-The figures use ERA5 for 1979--2022: daily wind for the optional period
-estimate and monthly data otherwise.  The composites exclude cycles with
+The figures use ERA5 for 1979--2022. Daily wind provides the period estimate.
+Monthly means provide all other diagnostics. The composites exclude cycles with
 onsets in 2015 and 2020, representing the 2016 and 2020 disruptions.
 The period diagnostics use the same exclusions.  The cycle-to-cycle
 variability diagnostics retain both onset years.

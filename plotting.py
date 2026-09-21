@@ -18,13 +18,16 @@ def _plot_reference_pressure(ax, pressure=30.0, label=None, linewidth=1.0):
 def plot_composite(da, x, title="", x_label="", overlay=None,
                    overlay_step=None, overlay_color="k",
                    overlay_linestyles=None, pres_range=(1, 200), ax=None,
-                   reference_pres=30.0):
+                   reference_pres=30.0, colorbar_limits=None,
+                   x_limits=None, colorbar_label=None):
     """Plot a pressure--``x`` composite as filled contours.
 
     Fill levels use a zero-centred diverging scale. ``overlay`` adds labelled
     line contours at ``overlay_step`` intervals. Pressure defaults to
     1--200 hPa; ``ax`` selects an existing Matplotlib axes. A dashed line
-    marks ``reference_pres`` when it is not ``None``.
+    marks ``reference_pres`` when it is not ``None``. ``colorbar_limits`` and
+    ``x_limits`` set explicit two-element plotting limits. ``colorbar_label``
+    labels the filled-contour colourbar.
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
@@ -34,9 +37,24 @@ def plot_composite(da, x, title="", x_label="", overlay=None,
         da = da.sel(pres=slice(*sorted(pres_range)))
         if overlay is not None:
             overlay = overlay.sel(pres=da["pres"])
-    lim = float(abs(da).max())
-    levels = ticker.MaxNLocator(nbins=20, symmetric=True).tick_values(-lim, lim)
-    cs = ax.contourf(da[x], da["pres"], da.transpose("pres", x), levels=levels, cmap="RdBu_r")
+    if colorbar_limits is None:
+        lim = float(abs(da).max())
+        levels = ticker.MaxNLocator(nbins=20, symmetric=True).tick_values(
+            -lim, lim
+        )
+        extend = "neither"
+    else:
+        if len(colorbar_limits) != 2:
+            raise ValueError("colorbar_limits must contain two values")
+        lower, upper = (float(value) for value in colorbar_limits)
+        if not np.isfinite([lower, upper]).all() or lower >= upper:
+            raise ValueError("colorbar_limits must be finite and increasing")
+        levels = np.linspace(lower, upper, 21)
+        extend = "both"
+    cs = ax.contourf(
+        da[x], da["pres"], da.transpose("pres", x), levels=levels,
+        cmap="RdBu_r", extend=extend,
+    )
     if overlay is not None:
         if overlay_step is None:
             raise ValueError("overlay_step must be given with overlay")
@@ -53,10 +71,14 @@ def plot_composite(da, x, title="", x_label="", overlay=None,
     _plot_reference_pressure(ax, reference_pres)
     if x == "lag":
         ax.axvline(0, color="0.25", lw=0.8, ls="--", alpha=0.7)
+    if x_limits is not None:
+        if len(x_limits) != 2:
+            raise ValueError("x_limits must contain two values")
+        ax.set_xlim(*x_limits)
     ax.set_xlabel(x_label)
     ax.set_ylabel("Pressure (hPa)")
     ax.set_title(title)
-    fig.colorbar(cs, ax=ax)
+    fig.colorbar(cs, ax=ax, label=colorbar_label)
     return fig
 
 

@@ -11,6 +11,15 @@ VAR_ALIASES = {
     "o3": ["o3", "O3", "ozone", "go3", "ozone_mass_mixing_ratio",
            "mole_fraction_of_ozone_in_air", "mole_fraction_of_o3_in_air",
            "mass_fraction_of_ozone_in_air"],
+    "nox": ["nox", "NOx", "NOX", "nitrogen_oxides"],
+    "noy": ["noy", "NOy", "NOY", "total_reactive_nitrogen"],
+    "hno3": ["hno3", "HNO3", "nitric_acid"],
+    "hcl": ["hcl", "HCl", "HCL", "hydrogen_chloride"],
+    "n2o": ["n2o", "N2O", "nitrous_oxide"],
+    "ch4": ["ch4", "CH4", "methane"],
+    "cfc12": ["cfc12", "CFC12", "CFC-12", "CFC_12", "F12",
+              "dichlorodifluoromethane"],
+    "co": ["co", "CO", "carbon_monoxide"],
 }
 STANDARD_NAMES = {
     "eastward_wind": "u",
@@ -35,20 +44,24 @@ def load_data(source, variables=("u", "T"), lat_range=(-5, 5), level=30.0):
     ``latitude`` coordinates, pressure in hPa and zonal-mean fields. Returns
     ``(ds_native, ds_monthly)``; ``ds_native`` is ``None`` for monthly input.
     """
-    ds = source if isinstance(source, xr.Dataset) else xr.open_mfdataset(source, combine="by_coords")
+    ds = (source if isinstance(source, xr.Dataset)
+          else xr.open_mfdataset(source, combine="by_coords"))
 
     # Standardise coordinate names.
     for cf_name, aliases in COORD_ALIASES.items():
-        found = [a for a in aliases if a in ds.dims or a in ds.coords]
+        found = [name for name in aliases
+                 if name in ds.dims or name in ds.coords]
         if found and found[0] != cf_name:
             ds = ds.rename({found[0]: cf_name})
 
     # Standardise variable names, matching on name or CF standard_name.
-    for var in list(ds.data_vars):
-        std = STANDARD_NAMES.get(ds[var].attrs.get("standard_name"))
-        target = std or next((k for k, v in VAR_ALIASES.items() if var in v), None)
-        if target and target != var:
-            ds = ds.rename({var: target})
+    for name in list(ds.data_vars):
+        target = STANDARD_NAMES.get(ds[name].attrs.get("standard_name"))
+        target = target or next(
+            (canonical for canonical, aliases in VAR_ALIASES.items()
+             if name in aliases), None)
+        if target and target != name:
+            ds = ds.rename({name: target})
 
     missing = [v for v in variables if v not in ds]
     if missing:
@@ -62,7 +75,8 @@ def load_data(source, variables=("u", "T"), lat_range=(-5, 5), level=30.0):
         ds = ds.mean(dim="longitude")
 
     # Pressure to hPa (via units attribute, or magnitude as a fallback).
-    if ds["pres"].attrs.get("units", "").lower() in ("pa", "pascal") or ds["pres"].max() > 2000:
+    if (ds["pres"].attrs.get("units", "").lower() in ("pa", "pascal")
+            or ds["pres"].max() > 2000):
         ds = ds.assign_coords(pres=ds["pres"] / 100)
         ds["pres"].attrs["units"] = "hPa"
     ds = ds.sortby("latitude").sortby("pres")
