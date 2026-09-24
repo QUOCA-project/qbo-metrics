@@ -15,6 +15,131 @@ def _plot_reference_pressure(ax, pressure=30.0, label=None, linewidth=1.0):
                       alpha=0.8, label=label)
 
 
+def plot_eof_diagnostics(result, time, start=None, months=48):
+    """Show EOF structures, phase space and phase speed as in DallaSanta et al.
+
+    ``result`` comes from ``qbo_eof(..., return_diagnostics=True)``.
+    ``time`` contains the monthly dates used in the EOF calculation.
+    ``start`` selects the first displayed month; the metrics use all months.
+    """
+    time = np.asarray(time)
+    pcs = result["pcs"]
+    if time.size != pcs.shape[1]:
+        raise ValueError("time must match the EOF principal components")
+    if months < 3:
+        raise ValueError("months must be at least three")
+    first = 0 if start is None else int(np.searchsorted(time, np.datetime64(start)))
+    if first >= time.size:
+        raise ValueError("start must fall within the input time range")
+    shown = slice(first, min(first + months, time.size))
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), constrained_layout=True)
+    pressure = result["pressure"]
+    for mode in range(2):
+        axes[0].plot(
+            result["eof_patterns"][:, mode], pressure,
+            label=f"EOF {mode + 1} ({result['variance_by_mode'][mode]:.1%})")
+    axes[0].axvline(0, color="0.7", lw=0.8)
+    axes[0].set_yscale("log")
+    axes[0].set_ylim(float(max(pressure)), float(min(pressure)))
+    axes[0].set_xlabel("Wind anomaly (m/s)")
+    axes[0].set_ylabel("Pressure (hPa)")
+    axes[0].set_title("(a) Leading EOF patterns")
+    axes[0].legend(frameon=False)
+
+    pc1, pc2 = pcs[:, shown]
+    axes[1].plot(pc1, pc2, color="0.3", lw=1.2)
+    axes[1].scatter(pc1[0], pc2[0], color="green", label="start", zorder=3)
+    axes[1].scatter(pc1[-1], pc2[-1], color="red", label="end", zorder=3)
+    for k, date in enumerate(time[shown]):
+        month = np.datetime_as_string(date, unit="M")
+        if month.endswith("-01") and (
+                time[shown].size <= 120 or int(month[:4]) % 10 == 0):
+            axes[1].annotate(month[:4], (pc1[k], pc2[k]),
+                             xytext=(3, 3), textcoords="offset points", fontsize=8)
+    axes[1].axhline(0, color="0.8", lw=0.8)
+    axes[1].axvline(0, color="0.8", lw=0.8)
+    axes[1].set_aspect("equal", adjustable="box")
+    axes[1].set_xlabel("Standardised PC1")
+    axes[1].set_ylabel("Standardised PC2")
+    axes[1].set_title("(b) Phase-space trajectory")
+    axes[1].legend(frameon=False)
+
+    phase = result["phase"][shown]
+    axes[2].plot(time[shown], (phase - phase[0]) / (2 * np.pi),
+                 color="blue", label="phase")
+    axes[2].set_ylabel("Phase since start (cycles)", color="blue")
+    speed_ax = axes[2].twinx()
+    speed_ax.plot(time[shown], result["phase_speed"][shown],
+                  color="darkorange", label="phase speed")
+    speed_ax.axhline(2 * np.pi / result["period"], color="darkorange",
+                     ls="--", lw=0.8, label="mean speed")
+    speed_ax.set_ylabel("Phase speed (rad/month)", color="darkorange")
+    axes[2].set_xlabel("Time")
+    axes[2].set_title("(c) Phase and phase speed")
+    axes[2].tick_params(axis="x", rotation=30)
+
+    fig.suptitle(
+        f"EOF QBO: period {result['period']:.1f} months, "
+        f"amplitude {result['amplitude']:.1f} m/s, "
+        f"two-mode variance {result['variance_explained']:.1%}")
+    return fig
+
+
+def plot_eof_reconstruction(result, wind, start=None, months=48):
+    """Compare input wind with its two-EOF reconstruction and residual.
+
+    ``wind`` is the pressure-by-time DataArray used by ``qbo_eof``.
+    The reconstruction includes the time-mean wind at each pressure level.
+    """
+    wind = wind.sel(pres=result["pressure"]).transpose("pres", "time")
+    actual = wind.values
+    if actual.shape[1] != result["pcs"].shape[1]:
+        raise ValueError("wind time must match the EOF principal components")
+    reconstructed = (actual.mean(axis=1, keepdims=True)
+                     + result["eof_patterns"] @ result["pcs"])
+    residual = actual - reconstructed
+    time = wind["time"].values
+    if months < 3:
+        raise ValueError("months must be at least three")
+    first = 0 if start is None else int(np.searchsorted(time, np.datetime64(start)))
+    if first >= time.size:
+        raise ValueError("start must fall within the input time range")
+    shown = slice(first, min(first + months, time.size))
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True,
+                             constrained_layout=True)
+    pressure = result["pressure"]
+    wind_limit = max(float(abs(actual[:, shown]).max()),
+                     float(abs(reconstructed[:, shown]).max()))
+    wind_levels = np.linspace(-wind_limit, wind_limit, 21)
+    for ax, values, title in zip(
+            axes[:2], (actual, reconstructed),
+            ("(a) Input wind", "(b) Two-EOF reconstruction")):
+        colorset = ax.contourf(time[shown], pressure, values[:, shown],
+                               levels=wind_levels, cmap="RdBu_r", extend="both")
+        ax.set_title(title)
+    fig.colorbar(colorset, ax=axes[:2], label="Zonal wind (m/s)")
+
+    residual_limit = max(float(abs(residual[:, shown]).max()), 1.0)
+    colorset = axes[2].contourf(
+        time[shown], pressure, residual[:, shown],
+        levels=np.linspace(-residual_limit, residual_limit, 21),
+        cmap="RdBu_r", extend="both")
+    axes[2].set_title("(c) Input minus reconstructed")
+    fig.colorbar(colorset, ax=axes[2], label="Residual (m/s)")
+    for ax in axes:
+        ax.set_yscale("log")
+        ax.set_ylim(float(max(pressure)), float(min(pressure)))
+        ax.set_ylabel("Pressure (hPa)")
+        _plot_reference_pressure(ax)
+    axes[-1].set_xlabel("Time")
+    fig.suptitle(
+        f"Equatorial zonal wind: two EOFs explain "
+        f"{result['variance_explained']:.1%} of variance")
+    return fig
+
+
 def plot_composite(da, x, title="", x_label="", overlay=None,
                    overlay_step=None, overlay_color="k",
                    overlay_linestyles=None, pres_range=(1, 200), ax=None,
@@ -109,10 +234,11 @@ def plot_width_fits(fits, pres, title="QBO latitudinal structure"):
         good = bool(f["good_fit"]) if "good_fit" in f else True
         quality = (f"; error {float(f['normalized_rmse']):.2f}"
                    if "normalized_rmse" in f else "")
-        if ("width_discontinuity" in f and
-                np.isfinite(float(f["width_discontinuity"]))):
-            quality += (f"; width jump "
-                        f"{np.exp(float(f['width_discontinuity'])):.1f}x")
+        if "width_discontinuity" in f:
+            discontinuity = float(f["width_discontinuity"])
+            quality += (f"; width jump {np.exp(discontinuity):.1f}x"
+                        if np.isfinite(discontinuity)
+                        else "; width check skipped")
         ax.axhline(0, color="0.85", lw=1)
         ax.plot(f["latitude"], f["profile"], color="red", lw=2, label="composite")
         fit_alpha = 1.0 if good else 0.35
