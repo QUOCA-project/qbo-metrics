@@ -1,4 +1,4 @@
-"""Run an end-to-end QBO composite and diagnostic workflow.
+"""Run QBO composite and EOF metrics with an end-to-end diagnostic workflow.
 
 The example excludes cycles with onsets in 2015 and 2020. Set the options
 below before running ``python example.py``.
@@ -10,17 +10,19 @@ from matplotlib import pyplot as plt
 
 from composite import (compute_composite, extract_events, reference_dates,
                        reference_timeseries)
+from eof import qbo_eof
 from metrics import (cycle_coherence, daily_composite_period, descent_rate,
                      latitudinal_width, max_min_amplitude, phase_amplitude,
                      zero_crossing_period_range)
 from plotting import (plot_composite, plot_cycle_coherence,
                       plot_cycle_summary, plot_descent_rate,
+                      plot_eof_diagnostics, plot_eof_reconstruction,
                       plot_period_fits, plot_phase_amplitude, plot_reference,
                       plot_width_fits, plot_width_section)
 from utils import load_composite, load_data, save_composite
 
 # Workflow settings.
-DATA_LOC = "qbo_metrics_example_data.nc"
+DATA_LOC = "example_data.nc"
 # For separate files, use ["/path/zonal_wind.nc", "/path/temperature.nc"].
 INPUT_VARIABLES = ("u", "T")
 REBUILD_COMPOSITES = True
@@ -30,6 +32,8 @@ SAVE_REFERENCE_DATES = True
 REFERENCE_DATES_PATH = "reference_dates.nc"
 SHEAR_TYPES = ("westerly", "easterly")
 COMPOSITE_LAT_RANGE = (0.0, 0.0)
+EOF_LAT_RANGE = (-5.0, 5.0)
+EOF_PLOT_START = "2001-01"
 
 # Composite plot controls. Use None for automatic limits or labels.
 COMPOSITE_PLOT_OPTIONS = {
@@ -108,6 +112,26 @@ def main():
         .load()
     )
 
+    # The EOF method uses all monthly wind samples in its equatorial band.
+    eof_wind = (
+        ds_monthly["u"].sel(
+            pres=slice(0.5, 200),
+            latitude=slice(*sorted(EOF_LAT_RANGE)))
+        .mean("latitude", keep_attrs=True)
+        .transpose("pres", "time")
+        .load()
+    )
+    eof_result = qbo_eof(eof_wind.values, eof_wind["pres"].values,
+                         return_diagnostics=True)
+    print(f"EOF QBO period: {eof_result['period']:.2f} months")
+    print(f"EOF QBO amplitude: {eof_result['amplitude']:.2f} m/s")
+    print(f"Two-EOF variance explained: "
+          f"{eof_result['variance_explained']:.1%}")
+    plot_eof_diagnostics(
+        eof_result, eof_wind["time"].values, start=EOF_PLOT_START)
+    plot_eof_reconstruction(
+        eof_result, eof_wind, start=EOF_PLOT_START)
+
     # Build both onset composites with one consistent configuration.
     composites = _get_composites(ds_monthly, reference, dates)
     westerly_composite = composites["westerly"]
@@ -136,19 +160,22 @@ def main():
         for pressure in selected["pres"].values:
             level = selected.sel(pres=pressure)
             error = float(level["normalized_rmse"])
-            width_jump = np.exp(float(level["width_discontinuity"]))
+            discontinuity = float(level["width_discontinuity"])
+            width_quality = (f"width jump {np.exp(discontinuity):.1f}x"
+                             if np.isfinite(discontinuity)
+                             else "width check skipped")
             if bool(level["good_fit"]):
                 print(
                     f"{var} at {pressure:.1f} hPa: "
                     f"scale {float(level['scale']):.1f} deg, "
                     f"FWHM {float(level['fwhm']):.1f} deg, "
                     f"centre {float(level['center']):+.1f} deg, "
-                    f"error {error:.2f}, width jump {width_jump:.1f}x"
+                    f"error {error:.2f}, {width_quality}"
                 )
             else:
                 print(
                     f"{var} at {pressure:.1f} hPa: fit rejected "
-                    f"(error {error:.2f}, width jump {width_jump:.1f}x)"
+                    f"(error {error:.2f}, {width_quality})"
                 )
 
     plot_width_fits(width_fits, pres=pres_by_var)

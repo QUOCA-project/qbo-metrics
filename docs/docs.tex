@@ -19,7 +19,7 @@
 \setcounter{tocdepth}{2}
 \newcommand{\unit}[1]{\,\mathrm{#1}}
 
-\title{QBO composite and metrics methodology}
+\title{QBO metrics methodology}
 \author{}
 \date{\today}
 
@@ -29,17 +29,22 @@
 
 \section{Overview}
 
-This document defines a composite framework for characterising the
+This document defines composite and EOF methods for characterising the
 Quasi-Biennial Oscillation (QBO).  Westerly and easterly onsets are identified
 from the detrended, deseasonalised and smoothed 30-hPa zonal wind averaged over
 $5^\circ$S--$5^\circ$N.  Atmospheric fields composited about these onsets are
 used to diagnose latitudinal width, period, amplitude, phase, vertical extent
 and descent rate.  Individual cycles are compared with the composite using a
 coherence and correlation metrics.
+The EOF method estimates period, amplitude and variance explained from the
+monthly equatorial zonal wind.
 
-This methodology is a variation of the QBOi methodology, using 30 hPa as the reference pressure level and
-extending the compositing method to include latitudinal dependence. See \citet{pahlavan2021, simpson2025,
-yu2017, lee2024} for other examples of a QBO composite methodology.
+The composite methodology is a variation of the QBOi methodology, using 30 hPa as the reference pressure level
+and extending the method to include latitudinal dependence. See \citet{pahlavan2021, simpson2025, yu2017,
+lee2024} for other examples of a QBO composite methodology. The two-EOF phase-space view follows
+\citet{wallace1993}, using period and amplitude definitions and code from \citet{dallasanta2021}.
+
+See \texttt{example.py} for a demonstration of both the EOF and composite calculations.
 
 \begin{table}[htbp]
 \centering
@@ -56,6 +61,8 @@ negative to positive (westerly onset); crossings separated by less than five
 months are averaged. \\
 Composite & Mean deseasonalised anomaly over complete $\pm15$-month cycle
 windows. Users may exclude specified onset years and apply linear detrending. \\
+EOF metrics & Period, mean amplitude and variance explained from the first
+two log-pressure-weighted wind EOFs between 10 and 100~hPa. \\
 Latitudinal width & Full width at half maximum of a fitted parabolic-cylinder
 structure at each pressure level. \\
 Period, amplitude and phase & Sinusoidal fits to the composite lag profiles at each pressure level.
@@ -98,10 +105,10 @@ $\widehat{C}_x(\tau,p)$ & Fitted lag profile of $C_x$ at a specified latitude. \
 
 \section{Input data and workflow}
 
-The code accepts daily or monthly input data. Monthly means are the
-recommended input for composites. The loader resamples daily data to monthly
-means before compositing. The example uses available daily data for the period
-estimate. It otherwise calculates every diagnostic from monthly composites.
+The code accepts daily or monthly input data. Monthly means are the recommended input for composites. The loader
+resamples daily data to monthly means before compositing. If provided, daily data can be used to obtain a more
+accurate period estimate. All other composite diagnostics use monthly data. If a longitude axis is provided in
+the input data, it is reduced to a zonal mean.
 
 Set \texttt{DATA\_LOC} to a path containing both zonal wind and temperature, or provide a file list for separate
 wind and temperature files:
@@ -109,10 +116,48 @@ wind and temperature files:
 DATA_LOC = ["/data/zonal_wind.nc", "/data/temperature.nc"]
 \end{verbatim}
 
-An example minimal data file \texttt{qbo\_metrics\_example\_data.nc} is included in the GitHub repository,
+An example minimal data file \texttt{example\_data.nc} is included in the GitHub repository,
 containing both \texttt{u} and \texttt{T}. Separate files need compatible time and spatial coordinates. The
 loader recognises aliases for zonal wind, temperature, and trace gases including O3, NOx, NOy, HNO3, HCl, N2O,
 CH4, CFC12, and CO.
+
+\section{EOF methodology}
+
+The EOF method uses monthly zonal-mean zonal wind averaged over the chosen
+equatorial latitude band, $5^{\circ}$S--$5^{\circ}$N by default. The input has
+pressure and time dimensions, in that order. Pressure is in hPa, and wind is
+in m/s. The default analysis range is 10--100~hPa. No onset dates or cycle
+exclusions enter this method.
+
+At each pressure, subtract the time-mean wind. Weight the anomaly by the square
+root of its normalised log-pressure spacing, then calculate its singular value
+decomposition. Scale each of the first two physical EOFs to a peak of $+1$.
+Apply the inverse scale to their principal components, which retain wind units.
+The mean length of the two-component principal-component vector defines amplitude. The sum of their eigenvalues
+divided by the total eigenvalue sum defines variance explained. The phase speed of the standardised components
+gives the period; the default uses its mean, while \texttt{period\_mode="median"} uses its median.
+
+Figure~\ref{fig:eof} shows the EOF patterns, standardised principal components, phase and phase speed following
+figure A1 of \citet{dallasanta2021}. Figure~\ref{fig:eof-reconstruction} compares the input wind with its two-EOF
+reconstruction.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{eof_diagnostics.pdf}
+\caption{ERA5 leading EOF wind patterns, principal-component trajectory,
+phase, and phase speed for the full 1979--2022 monthly record. The wind is
+averaged over $5^{\circ}$S--$5^{\circ}$N.}
+\label{fig:eof}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{eof_reconstruction.pdf}
+\caption{ERA5 zonal wind averaged over $5^{\circ}$S--$5^{\circ}$N, its two-EOF
+reconstruction, and the residual for 1979--2022. Both wind panels use the
+same colour scale.}
+\label{fig:eof-reconstruction}
+\end{figure}
 
 \section{Composite methodology}
 \label{sec:composite}
@@ -184,7 +229,7 @@ pressure.}
 
 \FloatBarrier
 
-\section{QBO metrics}
+\subsection{QBO metrics}
 \label{sec:metrics}
 
 Use the parameter \texttt{COMPOSITE\_LAT\_RANGE} to control the size of the latitude mean applied to the
@@ -192,7 +237,7 @@ composite for computing metrics. It defaults to the equator, using \texttt{COMPO
 0.0)}. The range $5^{\circ}$S--$5^{\circ}$N may be more appropriate for less finely resolved data. Width
 diagnostics use the full latitude-resolved composite.
 
-\subsection{Latitudinal width}
+\subsubsection{Latitudinal width}
 
 Latitudinal structure is diagnosed from the composite profile at zero lag.  At each
 pressure level we fit a sum of parabolic-cylinder functions
@@ -214,8 +259,9 @@ The latitudinal width is calculated as the full width at half maximum (FWHM) of 
 lobe. For completeness, we also report the scale $s(p)$ (which, if equivalent to the FWHM, would be half its
 value).  A fit is accepted when its RMS residual, normalised by the full-cycle lag--latitude RMS after removal
 of the lag mean, is at most 0.5 and its log-FWHM differs by at most 0.1 from interpolation between adjacent
-presssure levels. This is designed to reject poor fits between the QBO jets and in the upper troposphere/lower
-stratosphere where the QBO amplitude weakens. Both thresholds are configurable. Figure~\ref{fig:width-fits}
+pressure levels. The continuity check applies only when both neighbouring log-pressure gaps are at most 0.15.
+Sparse pressure grids cannot resolve local smoothness, so only the residual test applies there.
+These thresholds are configurable. Figure~\ref{fig:width-fits}
 shows the latitudinal width calculation for zonal wind at 50 hPa and temperature at 30 hPa from ERA5.
 
 \begin{figure}[htbp]
@@ -227,7 +273,7 @@ respectively.}
 \label{fig:width-fits}
 \end{figure}
 
-\subsection{Period, amplitude, phase, and vertical extent}
+\subsubsection{Period, amplitude, phase, and vertical extent}
 
 At each pressure level, the composite lag profile is fitted with
 \begin{equation}
@@ -298,7 +344,7 @@ Grey dashed and green dash--dot lines mark 30~hPa and the vertical extent, respe
 
 \FloatBarrier
 
-\subsection{Descent rate}
+\subsubsection{Descent rate}
 
 The mean descent rate follows \citet{Schenzinger2017},
 adapted to pressure coordinates and the zonal-wind composite $C_u$.  For each
@@ -336,7 +382,7 @@ across individual QBO cycles and the grey dashed line marks 30~hPa.}
 \label{fig:descent}
 \end{figure}
 
-\subsection{Cycle-to-cycle coherence}
+\subsubsection{Cycle-to-cycle coherence}
 
 For each equatorial zonal-wind cycle $u'_c$ (with a $\pm15$-month window by default) and pressure level,
 coherence is the squared Pearson correlation with $C_u$ across lag,
@@ -446,6 +492,12 @@ Parameter & Default & Role \\
 \endfoot
 \bottomrule
 \endlastfoot
+\multicolumn{3}{@{}l}{\textit{EOF calculation}}\\[0.25em]
+EOF latitude band & $5^{\circ}$S--$5^{\circ}$N & Average the monthly zonal wind. \\
+EOF pressure range & 10--100 hPa & Levels used for the two-mode analysis. \\
+EOF retained modes & 2 & Leading modes used for the QBO reconstruction. \\
+EOF period mode & Mean & Average phase speed; median is an option. \\
+\addlinespace
 \multicolumn{3}{@{}l}{\textit{Reference timeseries}}\\[0.25em]
 Reference pressure & 30 hPa & Onset-defining level; interpolated if absent. \\
 Reference latitude band & $5^{\circ}$S--$5^{\circ}$N & Band averaged for the
@@ -518,16 +570,17 @@ Colourbar label & None & Set text with \texttt{colorbar\_label}. \\
 The figures use ERA5 for 1979--2022. Daily wind provides the period estimate.
 Monthly means provide all other diagnostics. The composites exclude cycles with
 onsets in 2015 and 2020, representing the 2016 and 2020 disruptions.
-The period diagnostics use the same exclusions.  The cycle-to-cycle
+The onset-period diagnostics use the same exclusions.  The cycle-to-cycle
 variability diagnostics retain both onset years.
 After these exclusions, 15 westerly and 17 easterly onsets have complete cycle windows.  Table
-\ref{tab:example-results} illustrates the resulting metrics; the values are
-not prescribed observational targets.
+\ref{tab:example-results} shows the QBO metrics from the EOF and composite methodologies.
 
 \begin{table}[htbp]
 \centering
-\caption{ERA5 results. Composite and period metrics exclude the disruption-onset
-years; variability metrics include them.}
+\caption{ERA5 results. Composite and onset-period metrics exclude the
+disruption-onset years; EOF metrics use the full 1979--2022 record averaged
+over $5^{\circ}$S--$5^{\circ}$N; variability metrics
+include both onset years.}
 \label{tab:example-results}
 \begin{tabularx}{0.94\textwidth}{@{}Xr@{}}
 \toprule
@@ -535,22 +588,41 @@ Quantity & ERA5 illustration \\
 \midrule
 Complete westerly/easterly cycle windows & 15 / 17 \\
 Complete westerly variability windows & 17 \\
-Monthly-sampled QBO period (easterly-/westerly-onset) & 28.54 / 27.34 months \\
+Monthly-sampled QBO period (easterly-/westerly-onset) & 28.54 / 27.30 months \\
 Daily-sampled QBO period (easterly-/westerly-onset) & 28.93 / 27.18 months \\
 Daily-sampled QBO period (average of both onsets) & 28.05 months / 853.9 days \\
+EOF QBO period (10--100 hPa) & 28.82 months \\
+EOF QBO amplitude (10--100 hPa) & 22.92 $\mathrm{m\,s^{-1}}$ \\
+EOF variance explained (first two modes) & 95.21\% \\
 Individual zero-crossing period range & 18.47--37.46 months \\
 Easterly--westerly period difference & 53.5 days \\
-Top vertical extent, easterly/westerly composites & 0.83 / 0.79 hPa \\
-Bottom vertical extent, easterly/westerly composites & 89.44 / 87.18 hPa \\
-Mean descent rate, easterly-/westerly-onset composite & 4.87 / 7.31 $\mathrm{hPa\,month^{-1}}$ \\
-Mean westerly-onset cycle coherence & 0.52 \\
+Top vertical extent, easterly/westerly composites & 0.81 / 0.77 hPa \\
+Bottom vertical extent, easterly/westerly composites & 89.32 / 87.19 hPa \\
+Mean descent rate, easterly-/westerly-onset composite & 4.88 / 7.18 $\mathrm{hPa\,month^{-1}}$ \\
+Mean westerly-onset cycle coherence & 0.53 \\
 Westerly-onset wind FWHM near 50 hPa & $22.8^{\circ}$ \\
-Westerly-onset temperature FWHM near 30 hPa & $16.6^{\circ}$ \\
+Westerly-onset temperature FWHM near 30 hPa & $16.7^{\circ}$ \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \begin{thebibliography}{9}
+\bibitem[Wallace et al.(1993)]{wallace1993}
+J. M. Wallace, R. L. Panetta, and J. Estberg,
+``Representation of the equatorial stratospheric quasi-biennial oscillation
+in EOF phase space,'' \emph{Journal of the Atmospheric Sciences}, 50,
+1751--1762, 1993.
+\href{https://journals.ametsoc.org/view/journals/atsc/50/12/1520-0469_1993_050_1751_rotesq_2_0_co_2.xml}
+{Journal article}.
+
+\bibitem[DallaSanta et al.(2021)]{dallasanta2021}
+K. DallaSanta, C. Orbe, D. Rind, L. Nazarenko, and J. Jonas,
+``Dynamical and trace gas responses of the quasi-biennial oscillation to
+increased CO$_2$,'' \emph{Journal of Geophysical Research: Atmospheres},
+126, e2020JD034151, 2021.
+\href{https://doi.org/10.1029/2020JD034151}
+{doi:10.1029/2020JD034151}.
+
 \bibitem[Schenzinger et al.(2017)]{Schenzinger2017}
 V. Schenzinger, S. Osprey, L. Gray, and N. Butchart,
 ``Defining metrics of the Quasi-Biennial Oscillation in global climate

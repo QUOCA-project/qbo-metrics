@@ -914,7 +914,8 @@ def fit_parabolic_cylinder(profile, orders=(0,), lat_range=(-30, 30)):
 
 def latitudinal_width(da, orders=None, lat_range=(-30, 30),
                       pres_range=(1, 200), max_normalized_rmse=0.5,
-                      max_width_discontinuity=0.1):
+                      max_width_discontinuity=0.1,
+                      max_log_pressure_gap=0.15):
     """Return lag-zero QBO latitudinal width at each pressure.
 
     Profiles over ``lat_range`` are fitted with the parabolic-cylinder
@@ -923,8 +924,10 @@ def latitudinal_width(da, orders=None, lat_range=(-30, 30),
     residual RMS normalised by full-cycle lag--latitude RMS and the local
     log-FWHM discontinuity in pressure. ``max_normalized_rmse`` and
     ``max_width_discontinuity`` set the acceptance thresholds; ``None``
-    disables a criterion. The result retains all fits and marks accepted
-    levels with ``good_fit``.
+    disables a criterion. The width check only uses adjacent levels within
+    ``max_log_pressure_gap``. Wider gaps cannot resolve local smoothness, so
+    the residual check alone decides acceptance there. The result retains
+    all fits and marks accepted levels with ``good_fit``.
     """
     if pres_range is not None:
         da = da.sel(pres=slice(*sorted(pres_range)))
@@ -932,6 +935,8 @@ def latitudinal_width(da, orders=None, lat_range=(-30, 30),
         raise ValueError("max_normalized_rmse must be positive or None")
     if max_width_discontinuity is not None and max_width_discontinuity <= 0:
         raise ValueError("max_width_discontinuity must be positive or None")
+    if max_log_pressure_gap is not None and max_log_pressure_gap <= 0:
+        raise ValueError("max_log_pressure_gap must be positive or None")
     da = da.sel(latitude=slice(*lat_range))
     if orders is None:
         temperature_or_ozone = {
@@ -981,6 +986,10 @@ def latitudinal_width(da, orders=None, lat_range=(-30, 30),
              (pressure > 0) & (fwhm > 0))
     for k in range(1, n_pres - 1):
         if valid[k - 1:k + 2].all():
+            if (max_log_pressure_gap is not None and
+                    np.max(np.diff(log_pressure[k - 1:k + 2])) >
+                    max_log_pressure_gap):
+                continue
             expected_log_width = np.interp(
                 log_pressure[k], log_pressure[[k - 1, k + 1]],
                 np.log(fwhm[[k - 1, k + 1]]))
@@ -1005,4 +1014,5 @@ def latitudinal_width(da, orders=None, lat_range=(-30, 30),
         attrs={name: value for name, value in (
             ("max_normalized_rmse", max_normalized_rmse),
             ("max_width_discontinuity", max_width_discontinuity),
+            ("max_log_pressure_gap", max_log_pressure_gap),
         ) if value is not None})
